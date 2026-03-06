@@ -10,6 +10,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
     o.SerializerOptions.PropertyNameCaseInsensitive = true);
 
 var app = builder.Build();
+var uiRouter = new UIBackendRouter();
 app.MapGet("/health", () => Results.Ok(new { ok = true }));
 
 app.MapPost("/window/list", () =>
@@ -34,11 +35,9 @@ app.MapPost("/ui/inspect_active_window", () =>
 {
     try
     {
-        var root = UIAutomationHelper.GetActiveWindowElement();
-        if (root == null)
+        var tree = uiRouter.InspectActiveWindow(maxDepth: 2);
+        if (tree == null)
             return Results.Ok(new { ok = false, error = "No active window found" });
-
-        var tree = UIAutomationHelper.BuildTree(root, maxDepth: 2);
         return Results.Ok(new { ok = true, tree });
     }
     catch (Exception ex)
@@ -53,10 +52,8 @@ app.MapPost("/ui/find_element", (FindElementRequest req) =>
     {
         if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId) && string.IsNullOrEmpty(req.ControlType))
             return Results.Ok(new { ok = false, error = "At least one of name, automationId, or controlType must be specified" });
-
-        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, req.ControlType);
-        var results = elements.Select(UIAutomationHelper.ToElementInfo).ToList();
-        return Results.Ok(new { ok = true, count = results.Count, elements = results });
+        var elements = uiRouter.FindElements(req.Name, req.AutomationId, req.ControlType);
+        return Results.Ok(new { ok = true, count = elements.Count, elements });
     }
     catch (Exception ex)
     {
@@ -70,18 +67,8 @@ app.MapPost("/ui/click_element", (ClickElementRequest req) =>
     {
         if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId))
             return Results.Ok(new { ok = false, error = "At least one of name or automationId must be specified" });
-
-        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, controlType: null);
-        if (elements.Count == 0)
-            return Results.Ok(new { ok = false, error = "No matching elements found" });
-
-        if (req.Index < 0 || req.Index >= elements.Count)
-            return Results.Ok(new { ok = false, error = $"Index {req.Index} out of range. Found {elements.Count} element(s)." });
-
-        var target = elements[req.Index];
-        var (success, message) = UIAutomationHelper.ClickElement(target);
-        var info = UIAutomationHelper.ToElementInfo(target);
-        return Results.Ok(new { ok = success, message, element = info });
+        var (success, message) = uiRouter.ClickElement(req.Name, req.AutomationId, req.Index);
+        return Results.Ok(new { ok = success, message });
     }
     catch (Exception ex)
     {
@@ -95,21 +82,10 @@ app.MapPost("/ui/set_text", (SetTextRequest req) =>
     {
         if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId))
             return Results.Ok(new { ok = false, error = "At least one of name or automationId must be specified" });
-
         if (req.Text == null)
             return Results.Ok(new { ok = false, error = "text field is required" });
-
-        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, controlType: null);
-        if (elements.Count == 0)
-            return Results.Ok(new { ok = false, error = "No matching elements found" });
-
-        if (req.Index < 0 || req.Index >= elements.Count)
-            return Results.Ok(new { ok = false, error = $"Index {req.Index} out of range. Found {elements.Count} element(s)." });
-
-        var target = elements[req.Index];
-        var (success, message) = UIAutomationHelper.SetText(target, req.Text);
-        var info = UIAutomationHelper.ToElementInfo(target);
-        return Results.Ok(new { ok = success, message, element = info });
+        var (success, message) = uiRouter.SetText(req.Name, req.AutomationId, req.Text, req.Index);
+        return Results.Ok(new { ok = success, message });
     }
     catch (Exception ex)
     {
@@ -123,18 +99,8 @@ app.MapPost("/ui/invoke", (InvokeRequest req) =>
     {
         if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId))
             return Results.Ok(new { ok = false, error = "At least one of name or automationId must be specified" });
-
-        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, controlType: null);
-        if (elements.Count == 0)
-            return Results.Ok(new { ok = false, error = "No matching elements found" });
-
-        if (req.Index < 0 || req.Index >= elements.Count)
-            return Results.Ok(new { ok = false, error = $"Index {req.Index} out of range. Found {elements.Count} element(s)." });
-
-        var target = elements[req.Index];
-        var (success, message) = UIAutomationHelper.InvokeElement(target);
-        var info = UIAutomationHelper.ToElementInfo(target);
-        return Results.Ok(new { ok = success, message, element = info });
+        var (success, message) = uiRouter.InvokeElement(req.Name, req.AutomationId, req.Index);
+        return Results.Ok(new { ok = success, message });
     }
     catch (Exception ex)
     {
