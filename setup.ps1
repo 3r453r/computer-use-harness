@@ -36,7 +36,8 @@ if (-not (Test-Path $envFile)) {
 }
 
 Write-Host ""
-Write-Host "Setup complete! You can now run:" -ForegroundColor Green
-Write-Host "  computer-use-harness tools" -ForegroundColor White
-Write-Host "  computer-use-harness run ""your task here""" -ForegroundColor White
+Write-Host "Setup complete!" -ForegroundColor Green
 Write-Host ""
+
+# Show help so the user knows what's available
+computer-use-harness help

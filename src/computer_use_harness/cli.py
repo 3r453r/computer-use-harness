@@ -139,6 +139,62 @@ def config() -> None:
     typer.echo(json.dumps(masked, indent=2, default=str))
 
 
+@app.command(name="help", help="Show usage examples and quick-start guide.")
+def help_cmd() -> None:
+    settings = Settings()
+    registry = build_registry(settings)
+    tool_count = len(registry.specs())
+
+    lines = [
+        "",
+        "  computer-use-harness - AI agent that operates your Windows PC",
+        "  " + "=" * 60,
+        "",
+        "  Commands:",
+        "    computer-use-harness run <task>     Run a task autonomously",
+        "    computer-use-harness tools          List registered tools (JSON)",
+        "    computer-use-harness config         Show current configuration",
+        "    computer-use-harness help           This guide",
+        "",
+        "  Quick start:",
+        '    computer-use-harness run "open notepad and type hello world"',
+        "",
+        "  Common examples:",
+        '    computer-use-harness run "take a screenshot"',
+        '    computer-use-harness run "find all .txt files on the desktop"',
+        '    computer-use-harness run "open calculator and compute 2+2"',
+        "",
+        "  Options for 'run':",
+        "    -n, --max-steps N         Max agent loop iterations (default: 15)",
+        "    -y, --auto-approve        Skip interactive approval prompts",
+        "    --fully-automated         Enable system.install tool + venv PATH",
+        "    --dry-run                 Plan without executing any tools",
+        "    -m, --model MODEL         OpenAI model to use (default: gpt-5.4)",
+        "",
+        "  Fully automated mode:",
+        '    computer-use-harness run "install requests and write a script" --fully-automated',
+        "    # Or via env: FULLY_AUTOMATED=true computer-use-harness run ...",
+        f"    # Adds system.install tool ({tool_count} tools default -> {tool_count + 1} with --fully-automated)",
+        "    # Injects venv PATH so pip/python work in subprocesses",
+        "    # Implies --auto-approve (all tools auto-approved)",
+        "",
+        "  Environment variables (.env file):",
+        "    OPENAI_API_KEY         Required. Your OpenAI API key",
+        "    OPENAI_MODEL           Model (default: gpt-5.4)",
+        "    MAX_STEPS              Loop limit (default: 15)",
+        "    AUTO_APPROVE_ALL       Auto-approve all tools (default: false)",
+        "    FULLY_AUTOMATED        Full automation mode (default: false)",
+        "    INSTALL_TIMEOUT_S      Install timeout in seconds (default: 300)",
+        "    DRY_RUN                Dry-run mode (default: false)",
+        "    SIDECAR_BASE_URL       .NET sidecar URL (default: http://127.0.0.1:47901)",
+        "    WORKSPACE_ROOT         Working directory (default: cwd)",
+        "    TOOL_TIMEOUT_S         Per-tool timeout (default: 20s)",
+        "    GUI_ACTION_DELAY_S     Delay after GUI actions (default: 1.5s)",
+        "",
+    ]
+    typer.echo("\n".join(lines))
+
+
 def _print_usage_summary(usage: dict | None) -> None:
     if not usage:
         return
