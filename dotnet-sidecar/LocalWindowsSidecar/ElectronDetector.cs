@@ -5,8 +5,8 @@ using System.Runtime.InteropServices;
 namespace LocalWindowsSidecar;
 
 /// <summary>
-/// Detects whether a given process is an Electron/CEF application
-/// by inspecting the process directory for Chromium markers.
+/// Detects whether a given process is an Electron/CEF/Chromium application
+/// that supports Chrome DevTools Protocol.
 /// </summary>
 public static class ElectronDetector
 {
@@ -16,6 +16,18 @@ public static class ElectronDetector
         "chrome_elf.dll",
         "electron.exe",
         "vk_swiftshader.dll",
+    };
+
+    /// <summary>
+    /// Executable names that are known Chromium-based browsers supporting CDP.
+    /// These host PWAs and web apps that are opaque to Windows UI Automation.
+    /// </summary>
+    private static readonly string[] ChromiumBrowserExes = new[]
+    {
+        "chrome.exe",
+        "msedge.exe",
+        "brave.exe",
+        "vivaldi.exe",
     };
 
     [DllImport("user32.dll")]
@@ -32,7 +44,7 @@ public static class ElectronDetector
     }
 
     /// <summary>
-    /// Returns true if the given PID is an Electron/CEF app.
+    /// Returns true if the given PID is an Electron/CEF/Chromium app that supports CDP.
     /// </summary>
     public static bool IsElectronProcess(int pid)
     {
@@ -46,15 +58,40 @@ public static class ElectronDetector
             if (string.IsNullOrEmpty(dir)) return false;
 
             var exeName = Path.GetFileName(exePath);
+
+            // Direct Electron executable
             if (exeName.Equals("electron.exe", StringComparison.OrdinalIgnoreCase))
                 return true;
 
+            // Known Chromium-based browsers (host PWAs like StemForge)
+            foreach (var browserExe in ChromiumBrowserExes)
+            {
+                if (exeName.Equals(browserExe, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            // Check marker files in exe directory
             foreach (var marker in ChromiumMarkers)
             {
                 if (File.Exists(Path.Combine(dir, marker)))
                     return true;
             }
 
+            // Check version subdirectories (Chrome stores chrome_elf.dll there)
+            try
+            {
+                foreach (var subDir in Directory.GetDirectories(dir))
+                {
+                    foreach (var marker in ChromiumMarkers)
+                    {
+                        if (File.Exists(Path.Combine(subDir, marker)))
+                            return true;
+                    }
+                }
+            }
+            catch { }
+
+            // Electron-specific: resources/electron.asar
             var resourcesDir = Path.Combine(dir, "resources");
             if (Directory.Exists(resourcesDir) &&
                 File.Exists(Path.Combine(resourcesDir, "electron.asar")))

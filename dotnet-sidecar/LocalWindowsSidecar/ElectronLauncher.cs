@@ -1,12 +1,14 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json.Nodes;
 
 namespace LocalWindowsSidecar;
 
 /// <summary>
-/// Manages relaunching Electron apps with --remote-debugging-port enabled,
-/// and discovering the CDP websocket URL.
+/// Manages connecting to Chromium-based apps via CDP.
+/// For standalone Electron apps: kill and relaunch with --remote-debugging-port.
+/// For Chrome/Edge PWAs: probe existing debug ports, or relaunch the browser.
 /// </summary>
 public static class ElectronLauncher
 {
@@ -14,15 +16,72 @@ public static class ElectronLauncher
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };
 
     /// <summary>
-    /// Relaunch an Electron app with CDP enabled.
-    /// Returns (websocketDebuggerUrl, newPid) or throws on failure.
+    /// Known Chromium browser executables that may host PWAs.
+    /// These should NOT be killed (would close all browser tabs).
     /// </summary>
-    public static async Task<(string WsUrl, int Pid)> RelaunchWithCdpAsync(int originalPid, int timeoutMs = 8000)
+    private static readonly string[] BrowserExes = { "chrome.exe", "msedge.exe", "brave.exe", "vivaldi.exe" };
+
+    /// <summary>
+    /// Connect to a Chromium-based app's CDP.
+    /// Strategy depends on whether it's a standalone Electron app or a browser PWA.
+    /// Returns (websocketDebuggerUrl, pid) or throws on failure.
+    /// </summary>
+    public static async Task<(string WsUrl, int Pid)> ConnectOrRelaunchAsync(int originalPid, int timeoutMs = 8000)
     {
         var proc = Process.GetProcessById(originalPid);
         var exePath = proc.MainModule?.FileName
             ?? throw new Exception($"Cannot get exe path for PID {originalPid}");
+        var exeName = Path.GetFileName(exePath);
 
+        // Check if this is a browser hosting a PWA
+        var isBrowser = BrowserExes.Any(b => exeName.Equals(b, StringComparison.OrdinalIgnoreCase));
+
+        if (isBrowser)
+        {
+            // For browsers: probe common debug ports (don't kill)
+            var wsUrl = await ProbeExistingCdpAsync();
+            if (wsUrl != null)
+                return (wsUrl, originalPid);
+
+            // No existing debug port found — relaunch browser with CDP enabled
+            // This will close all browser windows but is the only option
+            Console.Error.WriteLine($"[ElectronLauncher] No existing CDP port found for {exeName}. Relaunching with --remote-debugging-port.");
+        }
+
+        return await RelaunchWithCdpAsync(proc, exePath, timeoutMs);
+    }
+
+    /// <summary>
+    /// Probe common CDP ports (9222-9229) for an already-running debuggable browser.
+    /// Returns the first page websocket URL found, or null.
+    /// </summary>
+    private static async Task<string?> ProbeExistingCdpAsync()
+    {
+        for (int port = 9222; port <= 9229; port++)
+        {
+            try
+            {
+                var json = await Http.GetStringAsync($"http://127.0.0.1:{port}/json");
+                var targets = JsonNode.Parse(json)?.AsArray();
+                if (targets == null) continue;
+                foreach (var target in targets)
+                {
+                    var type = target?["type"]?.GetValue<string>();
+                    var wsUrl = target?["webSocketDebuggerUrl"]?.GetValue<string>();
+                    if (type == "page" && !string.IsNullOrEmpty(wsUrl))
+                        return wsUrl;
+                }
+            }
+            catch
+            {
+                // Port not open
+            }
+        }
+        return null;
+    }
+
+    private static async Task<(string WsUrl, int Pid)> RelaunchWithCdpAsync(Process proc, string exePath, int timeoutMs)
+    {
         // Pick a port
         var port = Interlocked.Increment(ref _nextPort);
         if (port > 9300) Interlocked.Exchange(ref _nextPort, 9222);
@@ -47,8 +106,7 @@ public static class ElectronLauncher
     }
 
     /// <summary>
-    /// Poll http://127.0.0.1:{port}/json to discover the CDP websocket URL.
-    /// Returns the websocket debugger URL of the first page target.
+    /// Poll http://127.0.0.1:{port}/json until a page target appears.
     /// </summary>
     private static async Task<string> PollForCdpAsync(int port, int timeoutMs)
     {

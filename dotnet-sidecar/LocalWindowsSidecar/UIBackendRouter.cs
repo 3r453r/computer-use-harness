@@ -38,7 +38,7 @@ public class UIBackendRouter : IUIBackend
 
             try
             {
-                var (wsUrl, newPid) = ElectronLauncher.RelaunchWithCdpAsync(p)
+                var (wsUrl, newPid) = ElectronLauncher.ConnectOrRelaunchAsync(p)
                     .GetAwaiter().GetResult();
 
                 var cdp = new CdpClient();
