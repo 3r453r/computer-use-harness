@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import base64
+import io
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 import structlog
+from PIL import Image
 
 from computer_use_harness.agent.openai_client import PlannerClient
+from computer_use_harness.agent.screenshot_diff import compute_diff
+from computer_use_harness.agent.stuck_detector import StuckDetector
 from computer_use_harness.config.settings import Settings
 from computer_use_harness.logging.trace import TraceRecorder
 from computer_use_harness.models.schemas import ActionResult, AgentDecision, RunUsage, StepUsage, TraceEntry
@@ -22,6 +28,7 @@ class AgentHarness:
         self.policy = ApprovalPolicy(settings)
         self.trace = TraceRecorder(settings.traces_dir)
         self.log = structlog.get_logger("harness")
+        self.stuck_detector = StuckDetector()
 
     def run_task(self, task: str) -> dict[str, Any]:
         run_id = str(uuid.uuid4())
@@ -29,8 +36,16 @@ class AgentHarness:
         state = {"cwd": str(Path.cwd()), "dry_run": self.settings.dry_run}
         run_usage = RunUsage()
         latest_screenshot: str | None = None
+        prev_screenshot_img: Image.Image | None = None
+        self.stuck_detector.reset()
 
         for step in range(1, self.settings.max_steps + 1):
+            # Inject stuck warning if needed
+            if self.stuck_detector.is_stuck():
+                warning = self.stuck_detector.warning_message()
+                history.append({"system_warning": warning})
+                self.log.warning("stuck_detected", step=step, warning=warning)
+
             decision, usage = self.planner.plan(
                 task, state=state, tools=self.registry.specs(),
                 history=history, screenshot_base64=latest_screenshot,
@@ -47,11 +62,31 @@ class AgentHarness:
             result = self._execute(decision)
             self.trace.append(TraceEntry(step=step, task=task, decision=decision, result=result))
 
+            # Record action for stuck detection
+            if decision.tool_call:
+                self.stuck_detector.record(decision.tool_call.tool, decision.tool_call.arguments)
+
+            # Auto-delay after GUI actions
+            if decision.tool_call and self._is_gui_tool(decision.tool_call.tool):
+                time.sleep(self.settings.gui_action_delay_s)
+
             # Extract screenshot base64 for next planner call (don't store in history)
             result_dump = result.model_dump(mode="json")
             if result.ok and isinstance(result.output, dict) and "image_base64" in result.output:
                 latest_screenshot = result.output["image_base64"]
-                result_dump["output"] = {k: v for k, v in result.output.items() if k != "image_base64"}
+                # Screenshot diff
+                img_bytes = base64.b64decode(latest_screenshot)
+                current_img = Image.open(io.BytesIO(img_bytes))
+                diff_info = compute_diff(prev_screenshot_img, current_img)
+                prev_screenshot_img = current_img
+                if diff_info["ui_changed"]:
+                    self.stuck_detector.notify_ui_changed()
+                # Add diff info and strip base64 from history
+                output_for_history = {k: v for k, v in result.output.items() if k != "image_base64"}
+                output_for_history.update(diff_info)
+                result_dump["output"] = output_for_history
+            elif result.ok and isinstance(result.output, dict):
+                result_dump["output"] = result.output
 
             history.append({"decision": decision.model_dump(), "result": result_dump})
 
@@ -80,3 +115,7 @@ class AgentHarness:
 
         tool = self.registry.get(call.tool)
         return tool.run(call.arguments)
+
+    @staticmethod
+    def _is_gui_tool(tool_name: str) -> bool:
+        return tool_name.startswith("mouse.") or tool_name.startswith("keyboard.")
