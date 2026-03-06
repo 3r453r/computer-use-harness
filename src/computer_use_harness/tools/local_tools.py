@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import psutil
+import pyautogui
+import requests
+from mss import mss
+from PIL import Image
+
+from computer_use_harness.config.settings import Settings
+from computer_use_harness.models.schemas import ActionResult, ToolSpec
+from computer_use_harness.tools.base import Tool
+
+pyautogui.FAILSAFE = True
+
+
+def _result(tool: str, ok: bool, output: Any = None, error: str | None = None) -> ActionResult:
+    now = datetime.now(tz=UTC)
+    return ActionResult(tool=tool, ok=ok, output=output, error=error, started_at=now, ended_at=now)
+
+
+class ScreenCaptureTool(Tool):
+    spec = ToolSpec(name="screen.capture", description="Capture full monitor screenshot", input_schema={"type": "object", "properties": {"mode": {"type": "string"}}, "required": ["mode"]})
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.settings.screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        mode = arguments.get("mode", "full")
+        target = self.settings.screenshots_dir / f"shot-{int(time.time()*1000)}.png"
+        with mss() as sct:
+            monitor = sct.monitors[0]
+            if mode == "active_window":
+                monitor = sct.monitors[1]
+            shot = sct.grab(monitor)
+            Image.frombytes("RGB", shot.size, shot.rgb).save(target)
+        return _result(self.spec.name, True, {"path": str(target), "mode": mode})
+
+
+class MouseTool(Tool):
+    spec = ToolSpec(name="mouse.dispatch", description="Mouse operations", input_schema={"type": "object"})
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        action = arguments.get("action")
+        x, y = arguments.get("x"), arguments.get("y")
+        if action == "move":
+            pyautogui.moveTo(x, y)
+        elif action == "click":
+            pyautogui.click(x=x, y=y, button=arguments.get("button", "left"))
+        elif action == "double_click":
+            pyautogui.doubleClick(x=x, y=y)
+        elif action == "right_click":
+            pyautogui.rightClick(x=x, y=y)
+        elif action == "scroll":
+            pyautogui.scroll(int(arguments.get("delta", 0)))
+        else:
+            return _result(self.spec.name, False, error=f"unknown action {action}")
+        return _result(self.spec.name, True, {"action": action})
+
+
+class KeyboardTool(Tool):
+    spec = ToolSpec(name="keyboard.dispatch", description="Keyboard operations", input_schema={"type": "object"})
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        action = arguments.get("action")
+        if action == "type":
+            pyautogui.write(arguments.get("text", ""), interval=0.01)
+        elif action == "hotkey":
+            pyautogui.hotkey(*arguments.get("keys", []))
+        else:
+            return _result(self.spec.name, False, error=f"unknown action {action}")
+        return _result(self.spec.name, True, {"action": action})
+
+
+class TerminalExecTool(Tool):
+    spec = ToolSpec(name="terminal.exec", description="Execute local shell command", input_schema={"type": "object", "required": ["command"]}, dangerous=True)
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        cmd = arguments["command"]
+        cwd = arguments.get("cwd") or str(self.settings.workspace_root)
+        timeout = int(arguments.get("timeout", self.settings.tool_timeout_s))
+        proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
+
+
+class FileSystemTool(Tool):
+    spec = ToolSpec(name="fs.dispatch", description="Filesystem operations", input_schema={"type": "object"})
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        action = arguments.get("action")
+        path = Path(arguments.get("path", "."))
+        if action == "read":
+            return _result(self.spec.name, True, path.read_text(encoding="utf-8"))
+        if action == "write":
+            path.write_text(arguments.get("content", ""), encoding="utf-8")
+            return _result(self.spec.name, True, {"path": str(path)})
+        if action == "list":
+            return _result(self.spec.name, True, sorted([p.name for p in path.iterdir()]))
+        return _result(self.spec.name, False, error=f"unknown action {action}")
+
+
+class ProcessTool(Tool):
+    spec = ToolSpec(name="process.dispatch", description="Process operations", input_schema={"type": "object"})
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        action = arguments.get("action")
+        if action == "list":
+            procs = [{"pid": p.pid, "name": p.name()} for p in psutil.process_iter(attrs=["name"])]
+            return _result(self.spec.name, True, procs[:200])
+        if action == "kill":
+            psutil.Process(int(arguments["pid"])).kill()
+            return _result(self.spec.name, True, {"pid": arguments["pid"]})
+        if action == "find":
+            pattern = arguments.get("pattern", ".*")
+            matched = []
+            for p in psutil.process_iter(attrs=["name"]):
+                if re.search(pattern, p.info.get("name") or "", re.IGNORECASE):
+                    matched.append({"pid": p.pid, "name": p.info.get("name")})
+            return _result(self.spec.name, True, matched)
+        return _result(self.spec.name, False, error=f"unknown action {action}")
+
+
+class BrowserTool(Tool):
+    spec = ToolSpec(name="browser.playwright", description="Browser automation wrapper", input_schema={"type": "object"})
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        return _result(self.spec.name, True, {"note": "Use dedicated playwright runner integration; wrapper wired for future extension.", "request": arguments})
+
+
+class SidecarTool(Tool):
+    spec = ToolSpec(name="sidecar.call", description="Call local .NET sidecar endpoint", input_schema={"type": "object", "required": ["operation"]}, dangerous=True)
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        operation = arguments["operation"].strip("/")
+        payload = arguments.get("payload", {})
+        try:
+            resp = requests.post(
+                f"{self.settings.sidecar_base_url}/{operation}",
+                json=payload,
+                timeout=self.settings.sidecar_timeout_s,
+            )
+            return _result(self.spec.name, resp.ok, {"status": resp.status_code, "body": resp.json() if resp.text else {}})
+        except Exception as exc:  # noqa: BLE001
+            return _result(self.spec.name, False, error=str(exc))
+
+
+class AliasTool(Tool):
+    def __init__(self, alias: str, delegate: Tool, action: str | None = None):
+        self.spec = ToolSpec(name=alias, description=f"Alias to {delegate.spec.name}", input_schema={"type": "object"}, dangerous=delegate.spec.dangerous)
+        self.delegate = delegate
+        self.action = action
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        args = dict(arguments)
+        if self.action is not None:
+            args["action"] = self.action
+        result = self.delegate.run(args)
+        result.tool = self.spec.name
+        return result

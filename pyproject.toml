@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "computer-use-harness"
+version = "0.1.0"
+description = "Local Windows computer-use harness with Python control plane and optional .NET sidecar"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "openai>=1.46.0",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.4.0",
+  "typer>=0.12.3",
+  "python-dotenv>=1.0.1",
+  "structlog>=24.2.0",
+  "playwright>=1.46.0",
+  "mss>=9.0.1",
+  "Pillow>=10.4.0",
+  "psutil>=6.0.0",
+  "pyautogui>=0.9.54",
+  "requests>=2.32.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.2"]
+
+[project.scripts]
+computer-use-harness = "computer_use_harness.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
