@@ -38,16 +38,19 @@ public static class ElectronLauncher
 
         if (isBrowser)
         {
-            // For browsers: probe common debug ports (don't kill)
+            // For browsers: probe common debug ports (don't kill — too destructive)
             var wsUrl = await ProbeExistingCdpAsync();
             if (wsUrl != null)
                 return (wsUrl, originalPid);
 
-            // No existing debug port found — relaunch browser with CDP enabled
-            // This will close all browser windows but is the only option
-            Console.Error.WriteLine($"[ElectronLauncher] No existing CDP port found for {exeName}. Relaunching with --remote-debugging-port.");
+            // No existing debug port — cannot relaunch browsers (would close all tabs)
+            throw new Exception(
+                $"Chrome/Edge PWA detected ({exeName}) but no CDP port found on 9222-9229. " +
+                $"To enable CDP for browser PWAs, restart your browser with: " +
+                $"\"{exePath}\" --remote-debugging-port=9222");
         }
 
+        // Standalone Electron apps can be safely relaunched
         return await RelaunchWithCdpAsync(proc, exePath, timeoutMs);
     }
 

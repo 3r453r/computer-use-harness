@@ -114,6 +114,14 @@ app.MapPost("/debug/backend_info", () =>
     {
         var backend = uiRouter.GetBackendForActiveWindow();
         var backendType = backend.GetType().Name;
+        var connected = false;
+        if (backend is CdpUIBackend cdpBackend)
+        {
+            // Test CDP connection with a simple eval
+            var testResult = cdpBackend.TestEval();
+            connected = testResult != null;
+            return Results.Ok(new { ok = true, backend = backendType, cdpConnected = connected, testEval = testResult });
+        }
         return Results.Ok(new { ok = true, backend = backendType });
     }
     catch (Exception ex)

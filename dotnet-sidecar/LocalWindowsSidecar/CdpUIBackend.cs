@@ -166,18 +166,57 @@ public class CdpUIBackend : IUIBackend
 
     private string? EvalSync(string expression)
     {
-        try
+        // Try eval, and if websocket is dead, reconnect and retry once
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            var parameters = new JsonObject
+            try
             {
-                ["expression"] = expression,
-                ["returnByValue"] = true
-            };
-            var result = _cdp.SendAsync("Runtime.evaluate", parameters, timeoutMs: 5000)
-                .GetAwaiter().GetResult();
-            return result?["result"]?["value"]?.GetValue<string>();
+                if (!_cdp.IsConnected)
+                {
+                    if (attempt == 0)
+                    {
+                        Console.Error.WriteLine("[CdpUIBackend] WebSocket disconnected, attempting reconnect...");
+                        var reconnected = _cdp.ReconnectAsync().GetAwaiter().GetResult();
+                        if (!reconnected)
+                        {
+                            Console.Error.WriteLine("[CdpUIBackend] Reconnection failed");
+                            return null;
+                        }
+                        Console.Error.WriteLine("[CdpUIBackend] Reconnected successfully");
+                        continue;
+                    }
+                    Console.Error.WriteLine("[CdpUIBackend] WebSocket still not connected after reconnect");
+                    return null;
+                }
+
+                var parameters = new JsonObject
+                {
+                    ["expression"] = expression,
+                    ["returnByValue"] = true
+                };
+                var result = _cdp.SendAsync("Runtime.evaluate", parameters, timeoutMs: 5000)
+                    .GetAwaiter().GetResult();
+
+                var value = result?["result"]?["value"]?.GetValue<string>();
+                return value;
+            }
+            catch (Exception ex) when (attempt == 0)
+            {
+                Console.Error.WriteLine($"[CdpUIBackend] EvalSync failed ({ex.Message}), attempting reconnect...");
+                try
+                {
+                    var reconnected = _cdp.ReconnectAsync().GetAwaiter().GetResult();
+                    if (!reconnected) return null;
+                }
+                catch { return null; }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[CdpUIBackend] EvalSync error: {ex.Message}");
+                return null;
+            }
         }
-        catch { return null; }
+        return null;
     }
 
     private static (bool Success, string Message) ParseActionResult(string? json)
@@ -195,6 +234,14 @@ public class CdpUIBackend : IUIBackend
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\n", "\\n").Replace("\r", "\\r");
+    }
+
+    /// <summary>
+    /// Test the CDP connection with a simple eval. Returns the result string or null.
+    /// </summary>
+    public string? TestEval()
+    {
+        return EvalSync("JSON.stringify({ok:true, elements: document.querySelectorAll('*').length, connected: true})");
     }
 
     public void Dispose()
