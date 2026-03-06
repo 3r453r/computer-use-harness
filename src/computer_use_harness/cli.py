@@ -5,6 +5,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -24,7 +25,23 @@ from computer_use_harness.tools.local_tools import (
 )
 from computer_use_harness.tools.registry import ToolRegistry
 
-app = typer.Typer(help="Local Windows computer-use harness")
+app = typer.Typer(
+    help="Local Windows computer-use harness — an AI agent that autonomously operates your PC.",
+    epilog=(
+        "Environment variables (also settable via .env file):\n\n"
+        "  OPENAI_API_KEY        Required. Your OpenAI API key.\n"
+        "  OPENAI_MODEL          Model to use (default: gpt-5.4)\n"
+        "  MAX_STEPS             Max agent loop iterations (default: 15)\n"
+        "  AUTO_APPROVE_ALL      Skip interactive approval prompts (default: false)\n"
+        "  DRY_RUN               Plan without executing tools (default: false)\n"
+        "  SIDECAR_BASE_URL      .NET sidecar URL (default: http://127.0.0.1:47901)\n"
+        "  PRICE_INPUT_PER_M     Input token price per 1M (default: 2.50)\n"
+        "  PRICE_OUTPUT_PER_M    Output token price per 1M (default: 10.00)\n"
+        "  WORKSPACE_ROOT        Working directory for tools (default: cwd)\n"
+        "  TOOL_TIMEOUT_S        Per-tool execution timeout in seconds (default: 20)\n"
+    ),
+    rich_markup_mode="rich",
+)
 
 
 def build_registry(settings: Settings) -> ToolRegistry:
@@ -59,9 +76,23 @@ def build_registry(settings: Settings) -> ToolRegistry:
     return ToolRegistry(tools=tools)
 
 
-@app.command()
-def run(task: str) -> None:
+@app.command(help="Run a task autonomously. Example: computer-use-harness run \"open notepad and type hello\"")
+def run(
+    task: str = typer.Argument(help="Natural language description of the task to perform"),
+    max_steps: Optional[int] = typer.Option(None, "--max-steps", "-n", help="Max agent loop iterations (env: MAX_STEPS)"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", "-y", help="Skip all interactive approval prompts"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan without executing any tools"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="OpenAI model to use (env: OPENAI_MODEL)"),
+) -> None:
     settings = Settings()
+    if max_steps is not None:
+        settings.max_steps = max_steps
+    if auto_approve:
+        settings.auto_approve_all = True
+    if dry_run:
+        settings.dry_run = True
+    if model is not None:
+        settings.openai_model = model
     configure_logging(settings.logs_dir)
     harness = AgentHarness(settings=settings, registry=build_registry(settings))
     result = harness.run_task(task)
@@ -78,11 +109,24 @@ def run(task: str) -> None:
     _print_usage_summary(result.get("usage"))
 
 
-@app.command()
+@app.command(help="List all registered tools and their schemas.")
 def tools() -> None:
     settings = Settings()
     registry = build_registry(settings)
     typer.echo(json.dumps([s.model_dump() for s in registry.specs()], indent=2))
+
+
+@app.command(help="Show current configuration (from env + .env file).")
+def config() -> None:
+    settings = Settings()
+    masked = settings.model_dump()
+    if masked.get("openai_api_key"):
+        key = masked["openai_api_key"]
+        masked["openai_api_key"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+    for k, v in masked.items():
+        if isinstance(v, Path):
+            masked[k] = str(v)
+    typer.echo(json.dumps(masked, indent=2, default=str))
 
 
 def _print_usage_summary(usage: dict | None) -> None:

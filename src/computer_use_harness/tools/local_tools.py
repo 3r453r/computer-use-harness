@@ -185,7 +185,13 @@ class SidecarTool(Tool):
                 json=payload,
                 timeout=self.settings.sidecar_timeout_s,
             )
-            return _result(self.spec.name, resp.ok, {"status": resp.status_code, "body": resp.json() if resp.text else {}})
+            try:
+                body = resp.json() if resp.text else {}
+            except Exception:  # noqa: BLE001
+                body = {"raw": resp.text}
+            if not resp.ok:
+                return _result(self.spec.name, False, error=f"Sidecar HTTP {resp.status_code} for /{operation}. Available endpoints: window/get_active, window/list, window/focus, ui/inspect_active_window, ui/find_element, ui/click_element, ui/set_text, ui/invoke")
+            return _result(self.spec.name, True, {"status": resp.status_code, "body": body})
         except Exception as exc:  # noqa: BLE001
             return _result(self.spec.name, False, error=str(exc))
 

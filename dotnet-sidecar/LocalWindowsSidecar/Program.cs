@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
+    o.SerializerOptions.PropertyNameCaseInsensitive = true);
 
 var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new { ok = true }));
