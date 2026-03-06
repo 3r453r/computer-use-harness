@@ -10,6 +10,7 @@ DANGEROUS_TOOL_NAMES = {
     "fs.write",
     "terminal.exec",
     "sidecar.call",
+    "system.install",
 }
 DENY_COMMAND_SUBSTRINGS = ["git push", "rm -rf", "shutdown", "format", "pip install", "npm install -g"]
 

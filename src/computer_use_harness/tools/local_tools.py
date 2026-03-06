@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import structlog
 import psutil
 import pyautogui
 import requests
@@ -212,6 +213,93 @@ class SidecarTool(Tool):
             return _result(self.spec.name, True, {"status": resp.status_code, "body": body})
         except Exception as exc:  # noqa: BLE001
             return _result(self.spec.name, False, error=str(exc))
+
+
+_install_log = structlog.get_logger("system.install")
+
+_MANAGER_TEMPLATES: dict[str, str] = {
+    "pip": "pip install {package} {args}",
+    "winget": "winget install --accept-source-agreements --accept-package-agreements {package} {args}",
+    "choco": "choco install {package} -y {args}",
+    "npm": "npm install {package} {args}",
+}
+
+_ALLOWED_SCRIPT_EXTENSIONS = {".ps1", ".bat", ".sh"}
+
+
+class SystemInstallTool(Tool):
+    spec = ToolSpec(
+        name="system.install",
+        description="Install packages or run setup scripts",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["package", "script"]},
+                "manager": {"type": "string", "enum": ["pip", "winget", "choco", "npm"]},
+                "package": {"type": "string"},
+                "args": {"type": "string"},
+                "script_path": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+        dangerous=True,
+    )
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    def run(self, arguments: dict[str, Any]) -> ActionResult:
+        action = arguments.get("action")
+        if action == "package":
+            return self._install_package(arguments)
+        if action == "script":
+            return self._run_script(arguments)
+        return _result(self.spec.name, False, error=f"Invalid action: {action!r}. Must be 'package' or 'script'.")
+
+    def _install_package(self, arguments: dict[str, Any]) -> ActionResult:
+        manager = arguments.get("manager")
+        package = arguments.get("package")
+        if not manager:
+            return _result(self.spec.name, False, error="Missing required 'manager' argument for package install")
+        if not package:
+            return _result(self.spec.name, False, error="Missing required 'package' argument for package install")
+        if manager not in _MANAGER_TEMPLATES:
+            return _result(self.spec.name, False, error=f"Unsupported manager: {manager!r}. Supported: {', '.join(_MANAGER_TEMPLATES)}")
+
+        args = arguments.get("args", "")
+        cmd = _MANAGER_TEMPLATES[manager].format(package=package, args=args).strip()
+        _install_log.info("package_install_start", manager=manager, package=package, cmd=cmd)
+        try:
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.settings.install_timeout_s)
+            _install_log.info("package_install_end", manager=manager, package=package, returncode=proc.returncode)
+            return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
+        except subprocess.TimeoutExpired:
+            return _result(self.spec.name, False, error=f"Install timed out after {self.settings.install_timeout_s}s")
+
+    def _run_script(self, arguments: dict[str, Any]) -> ActionResult:
+        script_path_str = arguments.get("script_path")
+        if not script_path_str:
+            return _result(self.spec.name, False, error="Missing required 'script_path' argument for script action")
+        script = Path(script_path_str)
+        if not script.exists():
+            return _result(self.spec.name, False, error=f"Script not found: {script}")
+        if script.suffix.lower() not in _ALLOWED_SCRIPT_EXTENSIONS:
+            return _result(self.spec.name, False, error=f"Unsupported script extension: {script.suffix!r}. Allowed: {', '.join(_ALLOWED_SCRIPT_EXTENSIONS)}")
+
+        if script.suffix.lower() == ".ps1":
+            cmd = f'powershell -ExecutionPolicy Bypass -File "{script}"'
+        elif script.suffix.lower() == ".bat":
+            cmd = f'"{script}"'
+        else:
+            cmd = f'bash "{script}"'
+
+        _install_log.info("script_run_start", script=str(script), cmd=cmd)
+        try:
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.settings.install_timeout_s)
+            _install_log.info("script_run_end", script=str(script), returncode=proc.returncode)
+            return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
+        except subprocess.TimeoutExpired:
+            return _result(self.spec.name, False, error=f"Script timed out after {self.settings.install_timeout_s}s")
 
 
 class AliasTool(Tool):

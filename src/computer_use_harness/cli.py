@@ -21,6 +21,7 @@ from computer_use_harness.tools.local_tools import (
     ProcessTool,
     ScreenCaptureTool,
     SidecarTool,
+    SystemInstallTool,
     TerminalExecTool,
 )
 from computer_use_harness.tools.registry import ToolRegistry
@@ -33,6 +34,8 @@ app = typer.Typer(
         "  OPENAI_MODEL          Model to use (default: gpt-5.4)\n"
         "  MAX_STEPS             Max agent loop iterations (default: 15)\n"
         "  AUTO_APPROVE_ALL      Skip interactive approval prompts (default: false)\n"
+        "  FULLY_AUTOMATED       Enable full automation incl. system.install (default: false)\n"
+        "  INSTALL_TIMEOUT_S     Timeout for install operations in seconds (default: 300)\n"
         "  DRY_RUN               Plan without executing tools (default: false)\n"
         "  SIDECAR_BASE_URL      .NET sidecar URL (default: http://127.0.0.1:47901)\n"
         "  PRICE_INPUT_PER_M     Input token price per 1M (default: 2.50)\n"
@@ -74,6 +77,8 @@ def build_registry(settings: Settings) -> ToolRegistry:
         "browser.playwright": browser,
         "sidecar.call": sidecar,
     }
+    if settings.fully_automated:
+        tools["system.install"] = SystemInstallTool(settings)
     return ToolRegistry(tools=tools)
 
 
@@ -82,6 +87,7 @@ def run(
     task: str = typer.Argument(help="Natural language description of the task to perform"),
     max_steps: Optional[int] = typer.Option(None, "--max-steps", "-n", help="Max agent loop iterations (env: MAX_STEPS)"),
     auto_approve: bool = typer.Option(False, "--auto-approve", "-y", help="Skip all interactive approval prompts"),
+    fully_automated: bool = typer.Option(False, "--fully-automated", help="Enable full automation including system.install tool"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan without executing any tools"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="OpenAI model to use (env: OPENAI_MODEL)"),
 ) -> None:
@@ -89,6 +95,9 @@ def run(
     if max_steps is not None:
         settings.max_steps = max_steps
     if auto_approve:
+        settings.auto_approve_all = True
+    if fully_automated:
+        settings.fully_automated = True
         settings.auto_approve_all = True
     if dry_run:
         settings.dry_run = True

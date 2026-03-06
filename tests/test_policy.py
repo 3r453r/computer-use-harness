@@ -14,6 +14,19 @@ def test_terminal_exec_requires_approval() -> None:
     assert policy.requires_approval(ToolCall(tool="terminal.exec", arguments={"command": "dir"}))
 
 
+def test_system_install_requires_approval() -> None:
+    settings = Settings(auto_approve_safe=False)
+    policy = ApprovalPolicy(settings)
+    assert policy.requires_approval(ToolCall(tool="system.install", arguments={"action": "package", "manager": "pip", "package": "requests"}))
+
+
+def test_system_install_approved_when_auto_approve_all() -> None:
+    settings = Settings(auto_approve_all=True)
+    policy = ApprovalPolicy(settings)
+    call = ToolCall(tool="system.install", arguments={"action": "package", "manager": "pip", "package": "requests"})
+    assert policy.approve(call)
+
+
 def test_path_allowlist() -> None:
     settings = Settings(workspace_root='.', allowed_paths='.')
     policy = ApprovalPolicy(settings)

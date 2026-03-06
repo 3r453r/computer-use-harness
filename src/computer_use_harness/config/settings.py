@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,16 +22,24 @@ class Settings(BaseSettings):
     dry_run: bool = Field(default=False)
     auto_approve_safe: bool = Field(default=True)
     auto_approve_all: bool = Field(default=False)
+    fully_automated: bool = Field(default=False)
 
     sidecar_base_url: str = Field(default="http://127.0.0.1:47901")
     sidecar_timeout_s: float = Field(default=5.0)
 
     max_steps: int = Field(default=15)
     tool_timeout_s: float = Field(default=20.0)
+    install_timeout_s: float = Field(default=300.0)
     gui_action_delay_s: float = Field(default=1.5)
 
     price_input_per_m: float = Field(default=2.50)
     price_output_per_m: float = Field(default=10.00)
+
+    @model_validator(mode="after")
+    def _fully_automated_implies_auto_approve(self) -> Settings:
+        if self.fully_automated:
+            self.auto_approve_all = True
+        return self
 
     @property
     def allowed_path_list(self) -> list[Path]:
