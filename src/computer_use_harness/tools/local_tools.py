@@ -177,6 +177,8 @@ class SidecarTool(Tool):
         self.settings = settings
 
     def run(self, arguments: dict[str, Any]) -> ActionResult:
+        if "operation" not in arguments:
+            return _result(self.spec.name, False, error="Missing required 'operation' argument. Usage: sidecar.call with operation='endpoint/path' and optional payload={...}")
         operation = arguments["operation"].strip("/")
         payload = arguments.get("payload", {})
         try:
