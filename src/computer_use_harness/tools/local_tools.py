@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +24,20 @@ from computer_use_harness.models.schemas import ActionResult, ToolSpec
 from computer_use_harness.tools.base import Tool
 
 pyautogui.FAILSAFE = True
+
+
+def _venv_env() -> dict[str, str] | None:
+    """Return an env dict with the active venv's bin dir prepended to PATH, or None if no venv."""
+    if sys.prefix == sys.base_prefix:
+        return None
+    if os.name == "nt":
+        bin_dir = str(Path(sys.prefix) / "Scripts")
+    else:
+        bin_dir = str(Path(sys.prefix) / "bin")
+    env = os.environ.copy()
+    env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+    env["VIRTUAL_ENV"] = sys.prefix
+    return env
 
 
 def _result(tool: str, ok: bool, output: Any = None, error: str | None = None) -> ActionResult:
@@ -124,8 +140,9 @@ class TerminalExecTool(Tool):
             return _result(self.spec.name, False, error="Missing required 'command' argument")
         cwd = arguments.get("cwd") or str(self.settings.workspace_root)
         timeout = int(arguments.get("timeout", self.settings.tool_timeout_s))
+        env = _venv_env() if self.settings.fully_automated else None
         try:
-            proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout)
+            proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout, env=env)
             return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
         except subprocess.TimeoutExpired:
             return _result(self.spec.name, False, error=f"Command timed out after {timeout}s")
@@ -218,7 +235,7 @@ class SidecarTool(Tool):
 _install_log = structlog.get_logger("system.install")
 
 _MANAGER_TEMPLATES: dict[str, str] = {
-    "pip": "python -m pip install {package} {args}",
+    "pip": "pip install {package} {args}",
     "winget": "winget install --accept-source-agreements --accept-package-agreements {package} {args}",
     "choco": "choco install {package} -y {args}",
     "npm": "npm install {package} {args}",
@@ -268,9 +285,10 @@ class SystemInstallTool(Tool):
 
         args = arguments.get("args", "")
         cmd = _MANAGER_TEMPLATES[manager].format(package=package, args=args).strip()
+        env = _venv_env()
         _install_log.info("package_install_start", manager=manager, package=package, cmd=cmd)
         try:
-            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.settings.install_timeout_s)
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.settings.install_timeout_s, env=env)
             _install_log.info("package_install_end", manager=manager, package=package, returncode=proc.returncode)
             return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
         except subprocess.TimeoutExpired:
@@ -293,9 +311,10 @@ class SystemInstallTool(Tool):
         else:
             cmd = f'bash "{script}"'
 
+        env = _venv_env()
         _install_log.info("script_run_start", script=str(script), cmd=cmd)
         try:
-            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.settings.install_timeout_s)
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=self.settings.install_timeout_s, env=env)
             _install_log.info("script_run_end", script=str(script), returncode=proc.returncode)
             return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
         except subprocess.TimeoutExpired:
