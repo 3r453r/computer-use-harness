@@ -39,6 +39,7 @@ app = typer.Typer(
         "  PRICE_OUTPUT_PER_M    Output token price per 1M (default: 10.00)\n"
         "  WORKSPACE_ROOT        Working directory for tools (default: cwd)\n"
         "  TOOL_TIMEOUT_S        Per-tool execution timeout in seconds (default: 20)\n"
+        "  GUI_ACTION_DELAY_S    Pause after GUI actions in seconds (default: 1.5)\n"
     ),
     rich_markup_mode="rich",
 )

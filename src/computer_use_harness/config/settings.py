@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     max_steps: int = Field(default=15)
     tool_timeout_s: float = Field(default=20.0)
+    gui_action_delay_s: float = Field(default=1.5)
 
     price_input_per_m: float = Field(default=2.50)
     price_output_per_m: float = Field(default=10.00)
