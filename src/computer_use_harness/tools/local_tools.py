@@ -87,11 +87,18 @@ class TerminalExecTool(Tool):
         self.settings = settings
 
     def run(self, arguments: dict[str, Any]) -> ActionResult:
-        cmd = arguments["command"]
+        cmd = arguments.get("command")
+        if not cmd:
+            return _result(self.spec.name, False, error="Missing required 'command' argument")
         cwd = arguments.get("cwd") or str(self.settings.workspace_root)
         timeout = int(arguments.get("timeout", self.settings.tool_timeout_s))
-        proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
+        try:
+            proc = subprocess.run(cmd, cwd=cwd, shell=True, capture_output=True, text=True, timeout=timeout)
+            return _result(self.spec.name, proc.returncode == 0, {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode})
+        except subprocess.TimeoutExpired:
+            return _result(self.spec.name, False, error=f"Command timed out after {timeout}s")
+        except Exception as exc:  # noqa: BLE001
+            return _result(self.spec.name, False, error=str(exc))
 
 
 class FileSystemTool(Tool):
@@ -103,6 +110,7 @@ class FileSystemTool(Tool):
         if action == "read":
             return _result(self.spec.name, True, path.read_text(encoding="utf-8"))
         if action == "write":
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(arguments.get("content", ""), encoding="utf-8")
             return _result(self.spec.name, True, {"path": str(path)})
         if action == "list":

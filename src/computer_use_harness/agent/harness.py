@@ -39,7 +39,7 @@ class AgentHarness:
 
             result = self._execute(decision)
             self.trace.append(TraceEntry(step=step, task=task, decision=decision, result=result))
-            history.append({"decision": decision.model_dump(), "result": result.model_dump()})
+            history.append({"decision": decision.model_dump(), "result": result.model_dump(mode="json")})
 
             if not result.ok:
                 self.log.warning("tool_failed", tool=result.tool, error=result.error)

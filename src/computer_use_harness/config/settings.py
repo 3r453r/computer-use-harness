@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     dry_run: bool = Field(default=False)
     auto_approve_safe: bool = Field(default=True)
+    auto_approve_all: bool = Field(default=False)
 
     sidecar_base_url: str = Field(default="http://127.0.0.1:47901")
     sidecar_timeout_s: float = Field(default=5.0)

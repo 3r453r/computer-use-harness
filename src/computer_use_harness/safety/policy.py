@@ -33,6 +33,8 @@ class ApprovalPolicy:
     def approve(self, call: ToolCall) -> bool:
         if self.settings.dry_run:
             return False
+        if self.settings.auto_approve_all:
+            return True
         if not self.requires_approval(call) and self.settings.auto_approve_safe:
             return True
         response = input(f"Approve tool '{call.tool}' with args {call.arguments}? [y/N]: ").strip().lower()
