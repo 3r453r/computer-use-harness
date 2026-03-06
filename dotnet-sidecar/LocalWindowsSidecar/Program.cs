@@ -166,6 +166,23 @@ internal static class WindowInterop
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    private const int SW_RESTORE = 9;
+    private const byte VK_MENU = 0x12;
+    private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+
     public static List<WindowInfo> ListWindows()
     {
         var windows = new List<WindowInfo>();
@@ -194,7 +211,32 @@ internal static class WindowInterop
         var regex = new Regex(pattern, RegexOptions.IgnoreCase);
         var found = ListWindows().FirstOrDefault(w => regex.IsMatch(w.Title));
         if (found == null) return false;
-        return SetForegroundWindow(new IntPtr(found.Handle));
+        var hWnd = new IntPtr(found.Handle);
+
+        // Restore if minimized
+        ShowWindow(hWnd, SW_RESTORE);
+
+        // Attach to the target window's thread to bypass SetForegroundWindow restrictions
+        GetWindowThreadProcessId(hWnd, out var targetThreadId);
+        var currentThreadId = GetCurrentThreadId();
+        var attached = false;
+        if (targetThreadId != currentThreadId)
+        {
+            attached = AttachThreadInput(currentThreadId, targetThreadId, true);
+        }
+
+        // Simulate Alt key press — standard workaround for SetForegroundWindow restrictions
+        keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
+        keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+        var result = SetForegroundWindow(hWnd);
+
+        if (attached)
+        {
+            AttachThreadInput(currentThreadId, targetThreadId, false);
+        }
+
+        return result;
     }
 
     private static string GetTitle(IntPtr hWnd)

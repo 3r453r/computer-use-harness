@@ -87,7 +87,23 @@ class KeyboardTool(Tool):
     def run(self, arguments: dict[str, Any]) -> ActionResult:
         action = arguments.get("action")
         if action == "type":
-            pyautogui.write(arguments.get("text", ""), interval=0.01)
+            text = arguments.get("text", "")
+            use_clipboard = arguments.get("use_clipboard", None)
+            # Auto-detect: use clipboard for paths, long strings, or non-ASCII
+            if use_clipboard is None:
+                use_clipboard = (
+                    len(text) > 30
+                    or "/" in text
+                    or "\\" in text
+                    or not text.isascii()
+                )
+            if use_clipboard:
+                import pyperclip
+                pyperclip.copy(text)
+                pyautogui.hotkey("ctrl", "v")
+                time.sleep(0.1)
+            else:
+                pyautogui.write(text, interval=0.01)
         elif action == "hotkey":
             pyautogui.hotkey(*arguments.get("keys", []))
         else:
