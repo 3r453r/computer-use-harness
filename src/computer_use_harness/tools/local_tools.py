@@ -218,7 +218,7 @@ class SidecarTool(Tool):
 _install_log = structlog.get_logger("system.install")
 
 _MANAGER_TEMPLATES: dict[str, str] = {
-    "pip": "pip install {package} {args}",
+    "pip": "python -m pip install {package} {args}",
     "winget": "winget install --accept-source-agreements --accept-package-agreements {package} {args}",
     "choco": "choco install {package} -y {args}",
     "npm": "npm install {package} {args}",
