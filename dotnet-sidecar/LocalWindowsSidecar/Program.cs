@@ -1,3 +1,4 @@
+using LocalWindowsSidecar;
 using LocalWindowsSidecar.Models;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -29,22 +30,115 @@ app.MapPost("/window/focus", (WindowFocusRequest req) =>
 
 app.MapPost("/ui/inspect_active_window", () =>
 {
-    var active = WindowInterop.GetActiveWindow();
-    return Results.Ok(new
+    try
     {
-        note = "MVP inspection returns active window metadata. Extend with UIAutomation tree traversal.",
-        active
-    });
+        var root = UIAutomationHelper.GetActiveWindowElement();
+        if (root == null)
+            return Results.Ok(new { ok = false, error = "No active window found" });
+
+        var tree = UIAutomationHelper.BuildTree(root, maxDepth: 2);
+        return Results.Ok(new { ok = true, tree });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
 });
 
-app.MapPost("/ui/find_element", (Dictionary<string, object> req) =>
-    Results.Ok(new { ok = false, note = "Not yet implemented in MVP", request = req }));
-app.MapPost("/ui/invoke", (Dictionary<string, object> req) =>
-    Results.Ok(new { ok = false, note = "Not yet implemented in MVP", request = req }));
-app.MapPost("/ui/set_text", (Dictionary<string, object> req) =>
-    Results.Ok(new { ok = false, note = "Not yet implemented in MVP", request = req }));
-app.MapPost("/ui/click_element", (Dictionary<string, object> req) =>
-    Results.Ok(new { ok = false, note = "Not yet implemented in MVP", request = req }));
+app.MapPost("/ui/find_element", (FindElementRequest req) =>
+{
+    try
+    {
+        if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId) && string.IsNullOrEmpty(req.ControlType))
+            return Results.Ok(new { ok = false, error = "At least one of name, automationId, or controlType must be specified" });
+
+        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, req.ControlType);
+        var results = elements.Select(UIAutomationHelper.ToElementInfo).ToList();
+        return Results.Ok(new { ok = true, count = results.Count, elements = results });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
+});
+
+app.MapPost("/ui/click_element", (ClickElementRequest req) =>
+{
+    try
+    {
+        if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId))
+            return Results.Ok(new { ok = false, error = "At least one of name or automationId must be specified" });
+
+        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, controlType: null);
+        if (elements.Count == 0)
+            return Results.Ok(new { ok = false, error = "No matching elements found" });
+
+        if (req.Index < 0 || req.Index >= elements.Count)
+            return Results.Ok(new { ok = false, error = $"Index {req.Index} out of range. Found {elements.Count} element(s)." });
+
+        var target = elements[req.Index];
+        var (success, message) = UIAutomationHelper.ClickElement(target);
+        var info = UIAutomationHelper.ToElementInfo(target);
+        return Results.Ok(new { ok = success, message, element = info });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
+});
+
+app.MapPost("/ui/set_text", (SetTextRequest req) =>
+{
+    try
+    {
+        if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId))
+            return Results.Ok(new { ok = false, error = "At least one of name or automationId must be specified" });
+
+        if (req.Text == null)
+            return Results.Ok(new { ok = false, error = "text field is required" });
+
+        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, controlType: null);
+        if (elements.Count == 0)
+            return Results.Ok(new { ok = false, error = "No matching elements found" });
+
+        if (req.Index < 0 || req.Index >= elements.Count)
+            return Results.Ok(new { ok = false, error = $"Index {req.Index} out of range. Found {elements.Count} element(s)." });
+
+        var target = elements[req.Index];
+        var (success, message) = UIAutomationHelper.SetText(target, req.Text);
+        var info = UIAutomationHelper.ToElementInfo(target);
+        return Results.Ok(new { ok = success, message, element = info });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
+});
+
+app.MapPost("/ui/invoke", (InvokeRequest req) =>
+{
+    try
+    {
+        if (string.IsNullOrEmpty(req.Name) && string.IsNullOrEmpty(req.AutomationId))
+            return Results.Ok(new { ok = false, error = "At least one of name or automationId must be specified" });
+
+        var elements = UIAutomationHelper.FindElements(req.Name, req.AutomationId, controlType: null);
+        if (elements.Count == 0)
+            return Results.Ok(new { ok = false, error = "No matching elements found" });
+
+        if (req.Index < 0 || req.Index >= elements.Count)
+            return Results.Ok(new { ok = false, error = $"Index {req.Index} out of range. Found {elements.Count} element(s)." });
+
+        var target = elements[req.Index];
+        var (success, message) = UIAutomationHelper.InvokeElement(target);
+        var info = UIAutomationHelper.ToElementInfo(target);
+        return Results.Ok(new { ok = success, message, element = info });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
+});
 
 app.Run("http://127.0.0.1:47901");
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+from datetime import datetime
+from pathlib import Path
 
 import typer
 
@@ -62,7 +65,16 @@ def run(task: str) -> None:
     configure_logging(settings.logs_dir)
     harness = AgentHarness(settings=settings, registry=build_registry(settings))
     result = harness.run_task(task)
+    result["task"] = task
     typer.echo(json.dumps(result, indent=2))
+
+    # Save run result to .runs/
+    runs_dir = Path(".runs")
+    runs_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    slug = re.sub(r"[^a-zA-Z0-9_-]", "_", task)[:40].rstrip("_")
+    run_path = runs_dir / f"run-{stamp}-{slug}.json"
+    run_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
     _print_usage_summary(result.get("usage"))
 
 
