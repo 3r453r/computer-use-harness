@@ -35,8 +35,6 @@ class ScreenCaptureTool(Tool):
         self.settings = settings
         self.settings.screenshots_dir.mkdir(parents=True, exist_ok=True)
 
-    MAX_SCREENSHOT_DIM = 1280
-
     def run(self, arguments: dict[str, Any]) -> ActionResult:
         mode = arguments.get("mode", "full")
         target = self.settings.screenshots_dir / f"shot-{int(time.time()*1000)}.png"
@@ -48,13 +46,9 @@ class ScreenCaptureTool(Tool):
             img = Image.frombytes("RGB", shot.size, shot.rgb)
             img.save(target)
 
-        # Resize for vision and base64-encode
         w, h = img.size
-        if max(w, h) > self.MAX_SCREENSHOT_DIM:
-            scale = self.MAX_SCREENSHOT_DIM / max(w, h)
-            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
+        img.save(buf, format="JPEG", quality=75)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         return _result(self.spec.name, True, {

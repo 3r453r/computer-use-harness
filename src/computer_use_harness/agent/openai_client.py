@@ -11,13 +11,13 @@ from computer_use_harness.models.schemas import AgentDecision, ToolCall, ToolSpe
 
 SYSTEM_PROMPT = """You are a local Windows computer-use planner. Prefer deterministic tools (terminal/fs/process/browser/sidecar) when possible, but use screen.capture + mouse/keyboard for GUI interaction when needed.
 
-When you call screen.capture, the screenshot image will be attached to your next request so you can see the screen. Use this to:
-- Identify UI elements, buttons, text fields, and their positions
-- Click on elements using mouse.click with x,y coordinates matching the screenshot
+When you call screen.capture, the full-resolution screenshot will be attached to your next request so you can see the screen. Use this to:
+- Identify UI elements, buttons, text fields, and their pixel positions
+- Click on elements using mouse.click with x,y pixel coordinates from the screenshot
 - Type text with keyboard.type after clicking the right field
 - Take another screenshot to verify your actions worked
 
-Mouse coordinates correspond to the ORIGINAL screen resolution (provided in the screenshot result as width/height), not the resized image.
+The screenshot is at full screen resolution — x,y coordinates you read from the image map directly to mouse coordinates.
 
 Your response is structured JSON with these rules:
 - To execute a tool: set "kind" to "tool_call", set "tool_call" to an object with "tool", "arguments_json" (a JSON string of the arguments), and "reason". Set "message" to null.
@@ -52,7 +52,7 @@ class PlannerClient:
         if screenshot_base64:
             user_content: str | list[dict[str, Any]] = [
                 {"type": "input_text", "text": json.dumps(payload)},
-                {"type": "input_image", "image_url": f"data:image/png;base64,{screenshot_base64}"},
+                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{screenshot_base64}"},
             ]
         else:
             user_content = json.dumps(payload)
