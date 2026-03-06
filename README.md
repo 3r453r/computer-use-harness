@@ -85,23 +85,76 @@ Production-minded MVP for local-only automation on Windows 11.
     └── Program.cs
 ```
 
-## Setup (Windows)
+## Quick start (Windows, PowerShell)
+
+```powershell
+git clone https://github.com/3r453r/computer-use-harness.git
+cd computer-use-harness
+. .\setup.ps1          # creates venv, installs deps, copies .env
+```
+
+Then set your OpenAI API key in `.env`:
+```
+OPENAI_API_KEY=sk-...
+```
+
+That's it. The harness is ready to use.
+
+## Setup (manual)
 ### Python harness
 1. `python -m venv .venv`
-2. `.venv\\Scripts\\activate`
+2. `.venv\Scripts\Activate.ps1`
 3. `pip install -e .`
 4. `copy .env.example .env`
 5. Set `OPENAI_API_KEY` in `.env`
 
-### .NET sidecar
+### .NET sidecar (optional, for window operations)
 1. Install .NET 8 SDK on Windows
 2. `cd dotnet-sidecar/LocalWindowsSidecar`
 3. `dotnet run`
+4. Health check: `curl http://127.0.0.1:47901/health`
 
-## Run
-From repo root:
-- List tools: `computer-use-harness tools`
-- Run task: `computer-use-harness run "restart my Next.js dev server in the current repo"`
+## Usage
+
+```powershell
+# List available tools
+computer-use-harness tools
+
+# Run a task
+computer-use-harness run "restart my Next.js dev server"
+
+# Another example — multi-tool chain
+computer-use-harness run "Take a screenshot, list all windows, and write a summary to Desktop"
+```
+
+Each run prints a JSON result with the task output and a token usage summary:
+```
+Token Usage Summary
+────────────────────────────────────────────────────
+  Step  1:       846 in /     106 out   $0.0032
+  Step  2:     1,009 in /      36 out   $0.0029
+────────────────────────────────────────────────────
+  Total:      1,855 in /     142 out   $0.0061
+```
+
+## Configuration
+
+All settings are in `.env` (see `.env.example` for defaults):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_API_KEY` | *(required)* | OpenAI API key |
+| `OPENAI_MODEL` | `gpt-5.4` | Planner model |
+| `DRY_RUN` | `false` | Block all tool execution |
+| `AUTO_APPROVE_SAFE` | `true` | Auto-approve non-dangerous tools |
+| `AUTO_APPROVE_ALL` | `false` | Auto-approve all tools (no prompts) |
+| `MAX_STEPS` | `15` | Agent loop step limit |
+| `PRICE_INPUT_PER_M` | `2.50` | Input token price per 1M (for cost tracking) |
+| `PRICE_OUTPUT_PER_M` | `10.00` | Output token price per 1M (for cost tracking) |
+
+## Claude Code integration
+
+This repo includes a Claude Code skill at `skills/computer-use-harness/SKILL.md` and a `CLAUDE.md` so Claude Code can set up and operate the harness autonomously. Set `AUTO_APPROVE_ALL=true` in `.env` for non-interactive use.
 
 ## Safety model
 - `dry_run` blocks execution
