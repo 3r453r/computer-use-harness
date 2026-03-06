@@ -92,6 +92,7 @@ public class CdpUIBackend : IUIBackend
 
     public (bool Success, string Message) ClickElement(string? name, string? automationId, int index)
     {
+        // Phase 1: Find element, scroll into view, return center coordinates
         var js = @"
         (function() {
             var all = document.querySelectorAll('*');
@@ -114,11 +115,67 @@ public class CdpUIBackend : IUIBackend
             var target = matches[" + index + @"];
             if (target.scrollIntoViewIfNeeded) target.scrollIntoViewIfNeeded();
             else target.scrollIntoView({block:'center'});
-            target.click();
-            return JSON.stringify({ok: true, msg: 'Clicked via JS .click()'});
+            var rect = target.getBoundingClientRect();
+            var x = Math.round(rect.x + rect.width / 2);
+            var y = Math.round(rect.y + rect.height / 2);
+            return JSON.stringify({ok: true, msg: 'found', x: x, y: y});
         })()";
 
-        return ParseActionResult(EvalSync(js));
+        var findResult = EvalSync(js);
+        if (findResult == null) return (false, "CDP eval returned null");
+
+        try
+        {
+            var obj = JsonNode.Parse(findResult);
+            if (obj?["ok"]?.GetValue<bool>() != true)
+                return (false, obj?["msg"]?.GetValue<string>() ?? "Element not found");
+
+            var x = obj["x"]!.GetValue<double>();
+            var y = obj["y"]!.GetValue<double>();
+
+            // Phase 2: Use CDP Input.dispatchMouseEvent for a real browser click
+            DispatchClickSync(x, y);
+            return (true, $"Clicked via CDP Input.dispatchMouseEvent at ({x},{y})");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Click failed: {ex.Message}");
+        }
+    }
+
+    private void DispatchClickSync(double x, double y)
+    {
+        // Same sequence as Puppeteer: mouseMoved → mousePressed → mouseReleased
+        var move = new JsonObject
+        {
+            ["type"] = "mouseMoved",
+            ["x"] = x,
+            ["y"] = y
+        };
+        _cdp.SendAsync("Input.dispatchMouseEvent", move, timeoutMs: 2000)
+            .GetAwaiter().GetResult();
+
+        var down = new JsonObject
+        {
+            ["type"] = "mousePressed",
+            ["x"] = x,
+            ["y"] = y,
+            ["button"] = "left",
+            ["clickCount"] = 1
+        };
+        _cdp.SendAsync("Input.dispatchMouseEvent", down, timeoutMs: 2000)
+            .GetAwaiter().GetResult();
+
+        var up = new JsonObject
+        {
+            ["type"] = "mouseReleased",
+            ["x"] = x,
+            ["y"] = y,
+            ["button"] = "left",
+            ["clickCount"] = 1
+        };
+        _cdp.SendAsync("Input.dispatchMouseEvent", up, timeoutMs: 2000)
+            .GetAwaiter().GetResult();
     }
 
     public (bool Success, string Message) SetText(string? name, string? automationId, string text, int index)

@@ -37,9 +37,17 @@ class AgentHarness:
         run_usage = RunUsage()
         latest_screenshot: str | None = None
         prev_screenshot_img: Image.Image | None = None
+        steps_since_screenshot = 0
         self.stuck_detector.reset()
 
         for step in range(1, self.settings.max_steps + 1):
+            # Auto-capture screenshot if agent hasn't taken one in a while
+            if steps_since_screenshot >= 4 and latest_screenshot is None:
+                prev_screenshot_img, latest_screenshot = self._auto_screenshot(prev_screenshot_img)
+                if latest_screenshot:
+                    steps_since_screenshot = 0
+                    self.log.info("auto_screenshot", step=step, reason="periodic")
+
             # Inject stuck warning if needed
             if self.stuck_detector.is_stuck():
                 warning = self.stuck_detector.warning_message()
@@ -66,6 +74,9 @@ class AgentHarness:
             if decision.tool_call:
                 self.stuck_detector.record(decision.tool_call.tool, decision.tool_call.arguments)
 
+            # Record result for ineffective-action stuck detection
+            self.stuck_detector.record_result(result.ok, self._is_empty_result(result))
+
             # Auto-delay after GUI actions
             if decision.tool_call and self._is_gui_tool(decision.tool_call.tool):
                 time.sleep(self.settings.gui_action_delay_s)
@@ -74,6 +85,7 @@ class AgentHarness:
             result_dump = result.model_dump(mode="json")
             if result.ok and isinstance(result.output, dict) and "image_base64" in result.output:
                 latest_screenshot = result.output["image_base64"]
+                steps_since_screenshot = 0
                 # Screenshot diff
                 img_bytes = base64.b64decode(latest_screenshot)
                 current_img = Image.open(io.BytesIO(img_bytes))
@@ -81,12 +93,17 @@ class AgentHarness:
                 prev_screenshot_img = current_img
                 if diff_info["ui_changed"]:
                     self.stuck_detector.notify_ui_changed()
+                else:
+                    self.stuck_detector.notify_ui_unchanged()
                 # Add diff info and strip base64 from history
                 output_for_history = {k: v for k, v in result.output.items() if k != "image_base64"}
                 output_for_history.update(diff_info)
                 result_dump["output"] = output_for_history
             elif result.ok and isinstance(result.output, dict):
                 result_dump["output"] = result.output
+                steps_since_screenshot += 1
+            else:
+                steps_since_screenshot += 1
 
             history.append({"decision": decision.model_dump(), "result": result_dump})
 
@@ -115,6 +132,36 @@ class AgentHarness:
 
         tool = self.registry.get(call.tool)
         return tool.run(call.arguments)
+
+    def _auto_screenshot(self, prev_img: Image.Image | None) -> tuple[Image.Image | None, str | None]:
+        """Take an automatic screenshot and run diff for stuck detection."""
+        try:
+            tool = self.registry.get("screen.capture")
+            result = tool.run({})
+            if result.ok and isinstance(result.output, dict) and "image_base64" in result.output:
+                b64 = result.output["image_base64"]
+                current_img = Image.open(io.BytesIO(base64.b64decode(b64)))
+                diff_info = compute_diff(prev_img, current_img)
+                if diff_info["ui_changed"]:
+                    self.stuck_detector.notify_ui_changed()
+                else:
+                    self.stuck_detector.notify_ui_unchanged()
+                return current_img, b64
+        except Exception:
+            pass
+        return prev_img, None
+
+    @staticmethod
+    def _is_empty_result(result: ActionResult) -> bool:
+        """Check if a tool result is effectively empty (e.g. find_element with count=0)."""
+        if not result.ok:
+            return True
+        if isinstance(result.output, dict):
+            if result.output.get("count") == 0:
+                return True
+            if result.output.get("ok") is False:
+                return True
+        return False
 
     @staticmethod
     def _is_gui_tool(tool_name: str) -> bool:
