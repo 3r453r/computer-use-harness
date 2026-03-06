@@ -108,6 +108,20 @@ app.MapPost("/ui/invoke", (InvokeRequest req) =>
     }
 });
 
+app.MapPost("/debug/backend_info", () =>
+{
+    try
+    {
+        var backend = uiRouter.GetBackendForActiveWindow();
+        var backendType = backend.GetType().Name;
+        return Results.Ok(new { ok = true, backend = backendType });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { ok = false, error = ex.Message });
+    }
+});
+
 app.Run("http://127.0.0.1:47901");
 
 internal static class WindowInterop
