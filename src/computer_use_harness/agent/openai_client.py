@@ -9,7 +9,15 @@ from computer_use_harness.config.settings import Settings
 from computer_use_harness.models.schemas import AgentDecision, ToolCall, ToolSpec
 
 
-SYSTEM_PROMPT = """You are a local Windows computer-use planner. Prefer deterministic tools (terminal/fs/process/browser/sidecar) over screenshot/pixel actions.
+SYSTEM_PROMPT = """You are a local Windows computer-use planner. Prefer deterministic tools (terminal/fs/process/browser/sidecar) when possible, but use screen.capture + mouse/keyboard for GUI interaction when needed.
+
+When you call screen.capture, the screenshot image will be attached to your next request so you can see the screen. Use this to:
+- Identify UI elements, buttons, text fields, and their positions
+- Click on elements using mouse.click with x,y coordinates matching the screenshot
+- Type text with keyboard.type after clicking the right field
+- Take another screenshot to verify your actions worked
+
+Mouse coordinates correspond to the ORIGINAL screen resolution (provided in the screenshot result as width/height), not the resized image.
 
 Your response is structured JSON with these rules:
 - To execute a tool: set "kind" to "tool_call", set "tool_call" to an object with "tool", "arguments_json" (a JSON string of the arguments), and "reason". Set "message" to null.
@@ -22,7 +30,14 @@ class PlannerClient:
         self.settings = settings
         self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
 
-    def plan(self, task: str, state: dict[str, Any], tools: list[ToolSpec], history: list[dict[str, Any]]) -> tuple[AgentDecision, dict[str, int]]:
+    def plan(
+        self,
+        task: str,
+        state: dict[str, Any],
+        tools: list[ToolSpec],
+        history: list[dict[str, Any]],
+        screenshot_base64: str | None = None,
+    ) -> tuple[AgentDecision, dict[str, int]]:
         if not self.client:
             return self._heuristic(task), {"input_tokens": 0, "output_tokens": 0}
 
@@ -32,11 +47,21 @@ class PlannerClient:
             "tools": [t.model_dump() for t in tools],
             "history": history,
         }
+
+        # Build user message — multimodal if screenshot available
+        if screenshot_base64:
+            user_content: str | list[dict[str, Any]] = [
+                {"type": "input_text", "text": json.dumps(payload)},
+                {"type": "input_image", "image_url": f"data:image/png;base64,{screenshot_base64}"},
+            ]
+        else:
+            user_content = json.dumps(payload)
+
         response = self.client.responses.create(
             model=self.settings.openai_model,
             input=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(payload)},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.1,
         )

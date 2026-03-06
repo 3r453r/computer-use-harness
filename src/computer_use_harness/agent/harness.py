@@ -28,9 +28,14 @@ class AgentHarness:
         history: list[dict[str, Any]] = []
         state = {"cwd": str(Path.cwd()), "dry_run": self.settings.dry_run}
         run_usage = RunUsage()
+        latest_screenshot: str | None = None
 
         for step in range(1, self.settings.max_steps + 1):
-            decision, usage = self.planner.plan(task, state=state, tools=self.registry.specs(), history=history)
+            decision, usage = self.planner.plan(
+                task, state=state, tools=self.registry.specs(),
+                history=history, screenshot_base64=latest_screenshot,
+            )
+            latest_screenshot = None  # consumed
             self._record_usage(run_usage, step, usage)
             self.log.info("decision", step=step, decision=decision.model_dump())
 
@@ -41,7 +46,14 @@ class AgentHarness:
 
             result = self._execute(decision)
             self.trace.append(TraceEntry(step=step, task=task, decision=decision, result=result))
-            history.append({"decision": decision.model_dump(), "result": result.model_dump(mode="json")})
+
+            # Extract screenshot base64 for next planner call (don't store in history)
+            result_dump = result.model_dump(mode="json")
+            if result.ok and isinstance(result.output, dict) and "image_base64" in result.output:
+                latest_screenshot = result.output["image_base64"]
+                result_dump["output"] = {k: v for k, v in result.output.items() if k != "image_base64"}
+
+            history.append({"decision": decision.model_dump(), "result": result_dump})
 
             if not result.ok:
                 self.log.warning("tool_failed", tool=result.tool, error=result.error)
