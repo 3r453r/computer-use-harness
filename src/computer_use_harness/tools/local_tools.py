@@ -108,13 +108,22 @@ class FileSystemTool(Tool):
         action = arguments.get("action")
         path = Path(arguments.get("path", "."))
         if action == "read":
-            return _result(self.spec.name, True, path.read_text(encoding="utf-8"))
+            try:
+                return _result(self.spec.name, True, path.read_text(encoding="utf-8"))
+            except UnicodeDecodeError:
+                size = path.stat().st_size
+                return _result(self.spec.name, False, error=f"Binary file ({path.suffix}, {size} bytes) — cannot read as text. Use screen.capture for images.")
+            except FileNotFoundError:
+                return _result(self.spec.name, False, error=f"File not found: {path}")
         if action == "write":
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(arguments.get("content", ""), encoding="utf-8")
             return _result(self.spec.name, True, {"path": str(path)})
         if action == "list":
-            return _result(self.spec.name, True, sorted([p.name for p in path.iterdir()]))
+            try:
+                return _result(self.spec.name, True, sorted([p.name for p in path.iterdir()]))
+            except FileNotFoundError:
+                return _result(self.spec.name, False, error=f"Directory not found: {path}")
         return _result(self.spec.name, False, error=f"unknown action {action}")
 
 
