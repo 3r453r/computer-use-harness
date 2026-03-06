@@ -34,6 +34,20 @@ class AgentDecision(BaseModel):
     tool_call: ToolCall | None = None
 
 
+class StepUsage(BaseModel):
+    step: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost: float = 0.0
+
+
+class RunUsage(BaseModel):
+    steps: list[StepUsage] = Field(default_factory=list)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost: float = 0.0
+
+
 class TraceEntry(BaseModel):
     step: int
     task: str

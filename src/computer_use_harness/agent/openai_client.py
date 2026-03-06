@@ -22,9 +22,9 @@ class PlannerClient:
         self.settings = settings
         self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
 
-    def plan(self, task: str, state: dict[str, Any], tools: list[ToolSpec], history: list[dict[str, Any]]) -> AgentDecision:
+    def plan(self, task: str, state: dict[str, Any], tools: list[ToolSpec], history: list[dict[str, Any]]) -> tuple[AgentDecision, dict[str, int]]:
         if not self.client:
-            return self._heuristic(task)
+            return self._heuristic(task), {"input_tokens": 0, "output_tokens": 0}
 
         payload = {
             "task": task,
@@ -41,7 +41,11 @@ class PlannerClient:
             temperature=0.1,
         )
         text = getattr(response, "output_text", "") or ""
-        return self._parse_response(text)
+        usage = {"input_tokens": 0, "output_tokens": 0}
+        if response.usage:
+            usage["input_tokens"] = response.usage.input_tokens
+            usage["output_tokens"] = response.usage.output_tokens
+        return self._parse_response(text), usage
 
     @staticmethod
     def _parse_response(text: str) -> AgentDecision:

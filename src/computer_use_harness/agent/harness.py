@@ -9,7 +9,7 @@ import structlog
 from computer_use_harness.agent.openai_client import PlannerClient
 from computer_use_harness.config.settings import Settings
 from computer_use_harness.logging.trace import TraceRecorder
-from computer_use_harness.models.schemas import ActionResult, AgentDecision, TraceEntry
+from computer_use_harness.models.schemas import ActionResult, AgentDecision, RunUsage, StepUsage, TraceEntry
 from computer_use_harness.safety.policy import ApprovalPolicy
 from computer_use_harness.tools.registry import ToolRegistry
 
@@ -27,15 +27,17 @@ class AgentHarness:
         run_id = str(uuid.uuid4())
         history: list[dict[str, Any]] = []
         state = {"cwd": str(Path.cwd()), "dry_run": self.settings.dry_run}
+        run_usage = RunUsage()
 
         for step in range(1, self.settings.max_steps + 1):
-            decision = self.planner.plan(task, state=state, tools=self.registry.specs(), history=history)
+            decision, usage = self.planner.plan(task, state=state, tools=self.registry.specs(), history=history)
+            self._record_usage(run_usage, step, usage)
             self.log.info("decision", step=step, decision=decision.model_dump())
 
             if decision.kind == "final":
                 self.trace.append(TraceEntry(step=step, task=task, decision=decision))
                 trace_path = self.trace.write(run_id)
-                return {"status": "completed", "message": decision.message, "trace": str(trace_path)}
+                return {"status": "completed", "message": decision.message, "trace": str(trace_path), "usage": run_usage.model_dump()}
 
             result = self._execute(decision)
             self.trace.append(TraceEntry(step=step, task=task, decision=decision, result=result))
@@ -45,7 +47,16 @@ class AgentHarness:
                 self.log.warning("tool_failed", tool=result.tool, error=result.error)
 
         trace_path = self.trace.write(run_id)
-        return {"status": "max_steps_exceeded", "trace": str(trace_path)}
+        return {"status": "max_steps_exceeded", "trace": str(trace_path), "usage": run_usage.model_dump()}
+
+    def _record_usage(self, run_usage: RunUsage, step: int, usage: dict[str, int]) -> None:
+        input_t = usage.get("input_tokens", 0)
+        output_t = usage.get("output_tokens", 0)
+        cost = (input_t * self.settings.price_input_per_m + output_t * self.settings.price_output_per_m) / 1_000_000
+        run_usage.steps.append(StepUsage(step=step, input_tokens=input_t, output_tokens=output_t, cost=cost))
+        run_usage.total_input_tokens += input_t
+        run_usage.total_output_tokens += output_t
+        run_usage.total_cost += cost
 
     def _execute(self, decision: AgentDecision) -> ActionResult:
         call = decision.tool_call

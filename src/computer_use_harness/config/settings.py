@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     max_steps: int = Field(default=15)
     tool_timeout_s: float = Field(default=20.0)
 
+    price_input_per_m: float = Field(default=2.50)
+    price_output_per_m: float = Field(default=10.00)
+
     @property
     def allowed_path_list(self) -> list[Path]:
         return [(self.workspace_root / raw.strip()).resolve() for raw in self.allowed_paths.split(",") if raw.strip()]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import typer
 
@@ -62,6 +63,7 @@ def run(task: str) -> None:
     harness = AgentHarness(settings=settings, registry=build_registry(settings))
     result = harness.run_task(task)
     typer.echo(json.dumps(result, indent=2))
+    _print_usage_summary(result.get("usage"))
 
 
 @app.command()
@@ -69,6 +71,23 @@ def tools() -> None:
     settings = Settings()
     registry = build_registry(settings)
     typer.echo(json.dumps([s.model_dump() for s in registry.specs()], indent=2))
+
+
+def _print_usage_summary(usage: dict | None) -> None:
+    if not usage:
+        return
+    steps = usage.get("steps", [])
+    if not steps:
+        return
+    w = sys.stderr.write
+    w("\n")
+    w("Token Usage Summary\n")
+    w("─" * 52 + "\n")
+    for s in steps:
+        w(f"  Step {s['step']:>2}:  {s['input_tokens']:>8,} in / {s['output_tokens']:>7,} out   ${s['cost']:.4f}\n")
+    w("─" * 52 + "\n")
+    w(f"  Total:   {usage['total_input_tokens']:>8,} in / {usage['total_output_tokens']:>7,} out   ${usage['total_cost']:.4f}\n")
+    w("\n")
 
 
 if __name__ == "__main__":
